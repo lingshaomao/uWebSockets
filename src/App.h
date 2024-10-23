@@ -29,13 +29,17 @@ namespace uWS {
      * properly implemented) - so we fully disable compression for this browser :-(
      * see https://github.com/uNetworking/uWebSockets/issues/1347 */
     inline bool hasBrokenCompression(std::string_view userAgent) {
+        // 查找 " Version/15." 字符串的位置
         size_t posStart = userAgent.find(" Version/15.");
         if (posStart == std::string_view::npos) return false;
+        // 跳过 " Version/15." 的长度（12 个字符）
         posStart += 12;
 
+        // 查找下一个空格的位置
         size_t posEnd = userAgent.find(' ', posStart);
         if (posEnd == std::string_view::npos) return false;
 
+        // 将找到的子字符串转换为整数，表示 Safari 的次要版本号
         unsigned int minorVersion = 0;
         auto result = std::from_chars(userAgent.data() + posStart, userAgent.data() + posEnd, minorVersion);
         if (result.ec != std::errc()) return false;
@@ -61,14 +65,15 @@ namespace uWS {
 
     /* This one matches us_socket_context_options_t but has default values */
     struct SocketContextOptions {
-        const char *key_file_name = nullptr;
-        const char *cert_file_name = nullptr;
-        const char *passphrase = nullptr;
-        const char *dh_params_file_name = nullptr;
-        const char *ca_file_name = nullptr;
-        const char *ssl_ciphers = nullptr;
-        int ssl_prefer_low_memory_usage = 0;
+        const char *key_file_name = nullptr;    // 私钥文件的路径
+        const char *cert_file_name = nullptr;   // 证书文件的路径
+        const char *passphrase = nullptr;       // 私钥的密码短语
+        const char *dh_params_file_name = nullptr;  // Diffie-Hellman 参数文件的路径
+        const char *ca_file_name = nullptr;     // CA 证书文件的路径
+        const char *ssl_ciphers = nullptr;      // SSL 密码套件列表
+        int ssl_prefer_low_memory_usage = 0;    // 是否优先考虑低内存使用
 
+        // 这是一个转换操作符，允许将 SocketContextOptions 对象隐式转换为 us_socket_context_options_t 类型
         /* Conversion operator used internally */
         operator struct us_socket_context_options_t() const {
             struct us_socket_context_options_t socket_context_options;
@@ -77,10 +82,11 @@ namespace uWS {
         }
     };
 
+    // 确保 us_socket_context_options_t 和 SocketContextOptions 的大小相同
     static_assert(sizeof(struct us_socket_context_options_t) == sizeof(SocketContextOptions), "Mismatching uSockets/uWebSockets ABI");
 
 template <bool SSL, typename BuilderPatternReturnType>
-struct TemplatedAppBase {
+struct TemplatedApp {
 private:
     /* The app always owns at least one http context, but creates websocket contexts on demand */
     HttpContext<SSL> *httpContext;
@@ -176,7 +182,7 @@ public:
         return 0;
     }
 
-    ~TemplatedAppBase() {
+    ~TemplatedApp() {
         /* Let's just put everything here */
         if (httpContext) {
             httpContext->free();
@@ -199,9 +205,9 @@ public:
     }
 
     /* Disallow copying, only move */
-    TemplatedAppBase(const TemplatedAppBase &other) = delete;
+    TemplatedApp(const TemplatedApp &other) = delete;
 
-    TemplatedAppBase(TemplatedAppBase &&other) {
+    TemplatedApp(TemplatedApp &&other) {
         /* Move HttpContext */
         httpContext = other.httpContext;
         other.httpContext = nullptr;
@@ -216,7 +222,7 @@ public:
         other.topicTree = nullptr;
     }
 
-    TemplatedAppBase(SocketContextOptions options = {}) {
+    TemplatedApp(SocketContextOptions options = {}) {
         httpContext = HttpContext<SSL>::create(Loop::get(), options);
 
         /* Register default handler for 404 (can be overridden by user) */
@@ -576,18 +582,6 @@ public:
         return std::move(static_cast<BuilderPatternReturnType &&>(*this));
     }
 
-    BuilderPatternReturnType &&removeChildApp(BuilderPatternReturnType *app) {
-        /* Remove this app from httpContextData list over child apps and reset round robin */
-        auto &childApps = httpContext->getSocketContextData()->childApps;
-        childApps.erase(
-            std::remove(childApps.begin(), childApps.end(), (void *) app),
-            childApps.end()
-        );
-        httpContext->getSocketContextData()->roundRobin = 0;
-        
-        return std::move(static_cast<BuilderPatternReturnType &&>(*this));
-    }
-
     BuilderPatternReturnType &&addChildApp(BuilderPatternReturnType *app) {
         /* Add this app to httpContextData list over child apps and set onPreOpen */
         httpContext->getSocketContextData()->childApps.push_back((void *) app);
@@ -649,11 +643,8 @@ public:
 #include "CachingApp.h"
 
 namespace uWS {
-    template <bool SSL>
-    using TemplatedApp = uWS::TemplatedAppBase<SSL, uWS::CachingApp<SSL>>;
-
-    typedef uWS::TemplatedApp<false> App;
-    typedef uWS::TemplatedApp<true> SSLApp;
+    typedef uWS::CachingApp<false> App;
+    typedef uWS::CachingApp<true> SSLApp;
 }
 
 #endif // UWS_APP_H

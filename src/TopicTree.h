@@ -114,13 +114,15 @@ private:
         /* Before we call cb we need to make sure this subscriber will not report needsDrainage()
          * since WebSocket::send will call drain from within the cb in that case.*/
         int numMessageIndices = s->numMessageIndices;
-        s->numMessageIndices = 0;
+        s->numMessageIndices = 0; 
+        // 在发送消息前，将 numMessageIndices 的值保存，然后将其重置为 0。
+        // 这是为了确保当在回调函数中调用 WebSocket::send 时，不会递归调用 drainImpl，从而避免发送消息的重复处理。
 
         /* Then we emit cb */
         for (int i = 0; i < numMessageIndices; i++) {
             T &outgoingMessage = outgoingMessages[s->messageIndices[i]];
 
-            int flags = (i == numMessageIndices - 1) ? LAST : 0;
+            int flags = (i == numMessageIndices - 1) ? LAST : 0; // 设置标志位（如第一条和最后一条消息的标志）
 
             /* Returning true will stop drainage short (such as when backpressure is too high) */
             if (cb(s, outgoingMessage, (IteratorFlags)(flags | (i == 0 ? FIRST : 0)))) {
@@ -279,6 +281,9 @@ public:
         }
     }
 
+    // publishBig 用于处理较大的消息，它会跳过缓冲，直接将消息发送到每个订阅者的回压队列（backpressure）
+    // publishBig 函数不使用缓冲区，而是直接将消息推送给订阅者，这对于处理大消息时能够提高效率。
+    // 通过回调函数 cb 实现消息发送的具体逻辑，函数本身不会对消息进行任何缓冲或复制。
     /* Big messages bypass all buffering and land directly in backpressure */
     template <typename F>
     bool publishBig(Subscriber *sender, std::string_view topic, B &&bigMessage, F cb) {
@@ -312,7 +317,7 @@ public:
         if (outgoingMessages.size() == UINT16_MAX) {
             /* If there is a socket that is currently corked, this will be ugly as all sockets will drain
              * to their own backpressure */
-            drain();
+            drain(); // 如果消息队列达到上限，则需要对所有订阅者进行排空处理
         }
 
         /* If nobody references this message, don't buffer it */
@@ -330,7 +335,7 @@ public:
                 /* If we already have too many outgoing messages on this subscriber, drain it now */
                 if (s->numMessageIndices == 32) {
                     /* This one does not need to check needsDrainage here but still does. */
-                    drain(s);
+                    drain(s); // 如果订阅者已经有 32 条待处理消息，则立即对其进行排空
                 }
 
                 /* Finally we can continue */
@@ -338,6 +343,7 @@ public:
                 /* First message adds subscriber to list of drainable subscribers */
                 if (s->numMessageIndices == 1) {
                     /* Insert us in the head of drainable subscribers */
+                    // 插入到链表的头部。这样做的目的是确保新有待处理消息的订阅者能够尽快被处理
                     s->next = drainableSubscribers;
                     s->prev = nullptr;
                     if (s->next) {
